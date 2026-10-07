@@ -1,0 +1,14 @@
+{
+  "tenant": "acme",
+  "name": "doc-converter",
+  "version": 1,
+  "owner": "docs-team@acme.com",
+  "model": "fake-scripted",
+  "trust": "standard",
+  "system_prompt": "Convert documents between formats. No network access.",
+  "exec": {
+    "image": "agentfleet/sandbox:dev",
+    "limits": { "cpus": 1, "memory_mb": 256, "pids": 64, "disk_mb": 128, "timeout_s": 20 },
+    "egress": []
+  }
+}

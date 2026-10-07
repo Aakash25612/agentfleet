@@ -1,0 +1,9 @@
+{
+  "tenant": "acme",
+  "name": "chat-only",
+  "version": 1,
+  "owner": "support@acme.com",
+  "model": "fake-scripted",
+  "trust": "low",
+  "system_prompt": "Answer customer questions. No tools."
+}

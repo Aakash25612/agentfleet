@@ -1,0 +1,17 @@
+{
+  "tenant": "acme",
+  "name": "repo-triager",
+  "version": 3,
+  "owner": "platform-team@acme.com",
+  "model": "fake-scripted",
+  "trust": "standard",
+  "system_prompt": "You triage issues in acme repositories. You may open issues in acme/* only.",
+  "exec": {
+    "image": "agentfleet/sandbox:dev",
+    "limits": { "cpus": 1, "memory_mb": 512, "pids": 128, "disk_mb": 256, "timeout_s": 30 },
+    "egress": [
+      { "host": "github.internal", "methods": ["GET"], "paths": ["/api/v3/**"], "credential": "github" },
+      { "host": "github.internal", "methods": ["POST"], "paths": ["/api/v3/repos/acme/*/issues"], "credential": "github" }
+    ]
+  }
+}

@@ -1,0 +1,142 @@
+# Local stand-in for the cluster. Mapping to Kubernetes is in README.md.
+name: agentfleet
+
+x-services: &services
+  image: agentfleet/services:dev
+  build: { context: ., dockerfile: images/services.Dockerfile }
+
+x-health: &health
+  interval: 1s
+  timeout: 2s
+  retries: 30
+
+x-secrets: &secrets
+  AF_ADMIN_TOKEN: dev-proxy-admin-token
+  AF_PROXY_TOKEN: dev-proxy-admin-token
+  AF_TOKEN: dev-executor-token
+
+networks:
+  platform:   # control plane: orchestrator -> executor -> proxy admin
+    ipam: { config: [{ subnet: 172.29.0.0/24 }] }
+  upstream:   # "the internet" as only the proxy sees it
+    ipam: { config: [{ subnet: 172.29.1.0/24 }] }
+  metadata:   # stands in for the node's 169.254.169.254
+    ipam: { config: [{ subnet: 169.254.169.0/24 }] }
+
+volumes:
+  audit: {}
+  upstream-ca: {}
+
+services:
+  # Builds the sandbox image; never runs as a service.
+  sandbox-image:
+    image: agentfleet/sandbox:dev
+    build: { context: ., dockerfile: images/sandbox.Dockerfile }
+    profiles: [build]
+
+  github:
+    <<: *services
+    command: [/bin/mockup, -role, github]
+    environment:
+      MOCK_TOKENS: ghs_acmeREALtoken_7f3a9c2e51d84b06=acme-bot,ghs_globexREALtoken_c0ffee12ab34cd56=globex-bot
+      CA_OUT: /shared/github.pem
+    volumes: [upstream-ca:/shared]
+    networks:
+      upstream: { aliases: [github.internal] }
+      platform: {}
+    healthcheck: { <<: *health, test: [CMD, /bin/mockup, -healthcheck, "http://127.0.0.1:8080/healthz"] }
+
+  exfil:
+    <<: *services
+    command: [/bin/mockup, -role, sink]
+    environment: { CA_OUT: /shared/exfil.pem }
+    volumes: [upstream-ca:/shared]
+    networks:
+      upstream: { aliases: [exfil.internal] }
+      platform: {}
+    healthcheck: { <<: *health, test: [CMD, /bin/mockup, -healthcheck, "http://127.0.0.1:8080/healthz"] }
+
+  metadata:
+    <<: *services
+    command: [/bin/mockup, -role, metadata]
+    networks:
+      metadata: { ipv4_address: 169.254.169.254, aliases: [metadata.internal] }
+      platform: {}
+    healthcheck: { <<: *health, test: [CMD, /bin/mockup, -healthcheck, "http://127.0.0.1:8080/healthz"] }
+
+  egressproxy:
+    <<: *services
+    container_name: af-egressproxy
+    command: [/bin/egressproxy]
+    environment:
+      <<: *secrets
+      AF_ADMIN_LISTEN: 172.29.0.10:9090   # platform network only; sandboxes cannot route here
+      AF_UPSTREAM_CA_DIR: /shared
+      AF_INTERNAL_UPSTREAMS: github.internal,exfil.internal
+    volumes:
+      - ./agents:/etc/agentfleet/agents:ro
+      - ./config/tenant-credentials.json:/run/secrets/tenant-credentials.json:ro
+      - audit:/var/log/agentfleet
+      - upstream-ca:/shared:ro
+    networks:
+      platform: { ipv4_address: 172.29.0.10 }
+      upstream: {}
+      metadata: {}
+    depends_on:
+      github: { condition: service_healthy }
+      exfil: { condition: service_healthy }
+      metadata: { condition: service_healthy }
+    healthcheck: { <<: *health, test: [CMD, /bin/egressproxy, -healthcheck, "http://172.29.0.10:9090/healthz"] }
+
+  executor:
+    <<: *services
+    container_name: af-executor
+    command: [/bin/executor]
+    user: "0:65532"   # root for the docker socket (in k8s: the sandbox controller's job); group lets auditors read its log
+    environment:
+      <<: *secrets
+      AF_PROXY_ADMIN: http://172.29.0.10:9090
+      AF_PROXY_CONTAINER: af-egressproxy
+      AF_RUNTIME: ${SANDBOX_RUNTIME:-}
+      AF_IMAGE_OVERRIDE: ${SANDBOX_IMAGE:-}
+      AF_IDLE_TTL: 10m
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./agents:/etc/agentfleet/agents:ro
+      - audit:/var/log/agentfleet
+    networks:
+      platform: { ipv4_address: 172.29.0.20 }
+    depends_on:
+      egressproxy: { condition: service_healthy }
+    healthcheck: { <<: *health, test: [CMD, /bin/executor, -healthcheck, "http://127.0.0.1:8080/healthz"] }
+
+  demo:
+    <<: *services
+    command: [/bin/demo]
+    profiles: [tools]
+    environment:
+      <<: *secrets
+      EXECUTOR_URL: http://172.29.0.20:8080
+      AUDIT_DIR: /audit
+    volumes: [audit:/audit:ro]
+    networks: [platform]
+
+  e2e:
+    <<: *services
+    entrypoint: [/bin/e2e.test, -test.count=1]
+    command: [-test.v]
+    profiles: [tools]
+    environment:
+      <<: *secrets
+      EXECUTOR_URL: http://172.29.0.20:8080
+      AUDIT_DIR: /audit
+      CREDS_FILE: /creds.json
+      GITHUB_STATS: http://github:8080/_mock/stats
+      EXFIL_STATS: http://exfil:8080/_mock/stats
+      METADATA_STATS: http://metadata:8080/_mock/stats
+      PROXY_ADMIN_IP: 172.29.0.10
+      BENCH_SANDBOXES: ${BENCH_SANDBOXES:-20}
+    volumes:
+      - audit:/audit:ro
+      - ./config/tenant-credentials.json:/creds.json:ro
+    networks: [platform]

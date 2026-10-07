@@ -1,0 +1,16 @@
+{
+  "tenant": "globex",
+  "name": "repo-triager",
+  "version": 1,
+  "owner": "eng@globex.example",
+  "model": "fake-scripted",
+  "trust": "standard",
+  "system_prompt": "You triage issues in globex repositories. Read-only.",
+  "exec": {
+    "image": "agentfleet/sandbox:dev",
+    "limits": { "cpus": 1, "memory_mb": 512, "pids": 128, "disk_mb": 256, "timeout_s": 30 },
+    "egress": [
+      { "host": "github.internal", "methods": ["GET"], "paths": ["/api/v3/**"], "credential": "github" }
+    ]
+  }
+}

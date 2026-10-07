@@ -1,0 +1,16 @@
+{
+  "tenant": "acme",
+  "name": "legacy-fetcher",
+  "version": 1,
+  "owner": "someone-in-a-hurry@acme.com",
+  "model": "fake-scripted",
+  "trust": "standard",
+  "system_prompt": "Deliberately misconfigured: grants a hostname that resolves to the metadata address. Policy says yes; the network guard must still say no.",
+  "exec": {
+    "image": "agentfleet/sandbox:dev",
+    "limits": { "cpus": 1, "memory_mb": 256, "pids": 64, "disk_mb": 64, "timeout_s": 20 },
+    "egress": [
+      { "host": "metadata.internal", "methods": ["GET"], "paths": ["/**"] }
+    ]
+  }
+}
